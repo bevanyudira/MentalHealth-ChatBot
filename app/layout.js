@@ -1,6 +1,8 @@
 import { Inter } from 'next/font/google';
 import './globals.css';
 
+import AuthProvider from './components/AuthProvider';
+
 const inter = Inter({
   subsets: ['latin'],
   display: 'swap',
@@ -14,7 +16,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="id" className={inter.className} style={{ height: '100%' }}>
-      <body style={{ height: '100%', overflow: 'hidden' }}>{children}</body>
+      <body style={{ height: '100%', overflow: 'hidden' }}>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

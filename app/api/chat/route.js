@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import connectDB from '@/lib/mongodb';
 import ChatSession from '@/lib/models/ChatSession';
 import SYSTEM_PROMPT from '@/lib/systemPrompt';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
@@ -29,10 +32,22 @@ export async function POST(request) {
 
     await connectDB();
 
-    let session = await ChatSession.findOne({ sessionId });
+    const sessionAuth = await getServerSession(authOptions);
+    const userId = sessionAuth?.user?.id;
+
+    let session;
+    if (userId) {
+      session = await ChatSession.findOne({ userId });
+    } else {
+      session = await ChatSession.findOne({ sessionId });
+    }
 
     if (!session) {
-      session = new ChatSession({ sessionId, history: [] });
+      session = new ChatSession({ 
+        sessionId: userId ? `user-${userId}` : sessionId, 
+        userId: userId || null, 
+        history: [] 
+      });
     }
 
     const model = genAI.getGenerativeModel({
@@ -83,12 +98,20 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const sessionId = searchParams.get('sessionId');
 
-    if (!sessionId) {
-      return NextResponse.json({ error: 'sessionId required' }, { status: 400 });
-    }
-
     await connectDB();
-    const session = await ChatSession.findOne({ sessionId });
+
+    const sessionAuth = await getServerSession(authOptions);
+    const userId = sessionAuth?.user?.id;
+
+    let session;
+    if (userId) {
+      session = await ChatSession.findOne({ userId });
+    } else {
+      if (!sessionId) {
+        return NextResponse.json({ error: 'sessionId required' }, { status: 400 });
+      }
+      session = await ChatSession.findOne({ sessionId });
+    }
 
     if (!session) {
       return NextResponse.json({ history: [] });

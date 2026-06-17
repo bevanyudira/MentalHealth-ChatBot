@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useSession, signOut } from 'next-auth/react';
+import Link from 'next/link';
 import { v4 as uuidv4 } from 'uuid';
 
 const SUGGESTIONS = [
@@ -11,6 +13,7 @@ const SUGGESTIONS = [
 ];
 
 export default function Home() {
+  const { data: session } = useSession();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -40,6 +43,8 @@ export default function Home() {
     sessionIdRef.current = storedId;
     
     // Fetch history
+    // Jika user sedang login, biarkan backend memprioritaskan userId daripada sessionId (meski dikirim)
+    // Tapi karena kita mengambil data, kita kirim saja yang ada. Backend akan handle jika ada auth session.
     fetch(`/api/chat?sessionId=${storedId}`)
       .then((res) => res.json())
       .then((data) => {
@@ -118,9 +123,26 @@ export default function Home() {
             <p>Siap mendengarkanmu dengan hangat</p>
           </div>
         </div>
-        <div className="header-status">
-          <div className="status-dot"></div>
-          <span>Online</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {session ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '13px', fontWeight: '500', color: 'var(--gray-600)' }}>
+                {session.user.name}
+              </span>
+              <button 
+                onClick={() => signOut()}
+                style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', background: 'var(--gray-100)', color: 'var(--gray-600)', border: 'none', cursor: 'pointer' }}
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <Link href="/login" style={{ fontSize: '13px', color: 'var(--purple)', textDecoration: 'none', fontWeight: '500' }}>
+                Masuk
+              </Link>
+            </div>
+          )}
         </div>
       </header>
 
