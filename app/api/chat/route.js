@@ -86,11 +86,45 @@ export async function POST(request) {
   } catch (error) {
     console.error('Error di /api/chat:', error);
 
-    const isRateLimit = error.status === 429 || error.message?.includes('429');
+    let isRateLimit = false;
+    let retryDelaySeconds = 20;
+    let isDailyQuota = false;
+
+    if (error.status === 429 || error.message?.includes('429')) {
+      isRateLimit = true;
+      
+      // Coba parse errorDetails dari respons Google Generative AI
+      if (error.errorDetails && Array.isArray(error.errorDetails)) {
+        for (const detail of error.errorDetails) {
+          if (detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo' && detail.retryDelay) {
+            const delay = parseInt(detail.retryDelay.replace('s', ''), 10);
+            if (!isNaN(delay)) retryDelaySeconds = delay;
+          }
+          if (detail['@type'] === 'type.googleapis.com/google.rpc.QuotaFailure' && Array.isArray(detail.violations)) {
+            for (const v of detail.violations) {
+              // Deteksi jika limit yang dicapai adalah per hari (PerDay)
+              if (v.quotaId && v.quotaId.toLowerCase().includes('perday')) {
+                isDailyQuota = true;
+              }
+            }
+          }
+        }
+      }
+      // Jika error message string dari Mongoose/Google berisi tulisan PerDay
+      if (error.message?.toLowerCase().includes('perday')) {
+        isDailyQuota = true;
+      }
+    }
 
     if (isRateLimit) {
+      if (isDailyQuota) {
+        return NextResponse.json(
+          { code: 'QUOTA_EXCEEDED', error: 'Batas penggunaan harian Gemini API Anda telah habis. Silakan coba lagi besok.' },
+          { status: 429 }
+        );
+      }
       return NextResponse.json(
-        { code: 'RATE_LIMIT', error: 'Batas penggunaan fitur tercapai. Silakan tunggu.' },
+        { code: 'RATE_LIMIT', retryDelay: retryDelaySeconds, error: 'Batas pesan terlalu cepat. Silakan tunggu.' },
         { status: 429 }
       );
     }

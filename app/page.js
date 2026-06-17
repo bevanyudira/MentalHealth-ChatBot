@@ -26,6 +26,7 @@ export default function Home() {
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
   const [rateLimitTimer, setRateLimitTimer] = useState(0);
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
 
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
@@ -183,7 +184,7 @@ export default function Home() {
 
   async function handleSend(overrideMessage) {
     const userMessage = (overrideMessage ?? input).trim();
-    if (!userMessage || isLoading || !activeSessionId || rateLimitTimer > 0) return;
+    if (!userMessage || isLoading || !activeSessionId || rateLimitTimer > 0 || isQuotaExceeded) return;
 
     setInput('');
     if (textareaRef.current) {
@@ -204,8 +205,12 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
-        if (response.status === 429 || data.code === 'RATE_LIMIT') {
-          throw new Error('RATE_LIMIT');
+        if (response.status === 429) {
+          if (data.code === 'QUOTA_EXCEEDED') {
+            throw new Error('QUOTA_EXCEEDED');
+          } else if (data.code === 'RATE_LIMIT') {
+            throw new Error(`RATE_LIMIT:${data.retryDelay || 20}`);
+          }
         }
         throw new Error(data.error || 'Gagal mendapat respons');
       }
@@ -219,11 +224,16 @@ export default function Home() {
 
     } catch (error) {
       console.error(error);
-      if (error.message === 'RATE_LIMIT') {
-        setRateLimitTimer(20);
-        // Hapus pesan user yang barusan optimis ditambahkan
+      const errMsg = error.message || '';
+      
+      if (errMsg === 'QUOTA_EXCEEDED') {
+        setIsQuotaExceeded(true);
         setMessages((prev) => prev.slice(0, -1));
-        // Kembalikan input user
+        if (!overrideMessage) setInput(userMessage);
+      } else if (errMsg.startsWith('RATE_LIMIT')) {
+        const delay = parseInt(errMsg.split(':')[1], 10) || 20;
+        setRateLimitTimer(delay);
+        setMessages((prev) => prev.slice(0, -1));
         if (!overrideMessage) setInput(userMessage);
       } else {
         setMessages((prev) => [
@@ -416,7 +426,13 @@ export default function Home() {
         {/* Input Area */}
         <div className="input-area" style={{ margin: '0 auto', width: '100%', maxWidth: '48rem', borderTop: 'none', background: 'transparent', paddingBottom: '24px' }}>
           
-          {rateLimitTimer > 0 && (
+          {isQuotaExceeded && (
+            <div style={{ padding: '10px 16px', background: 'var(--error-bg)', border: '1px solid var(--error-border)', color: 'var(--error)', borderRadius: '12px', marginBottom: '12px', fontSize: '13px', textAlign: 'center', fontWeight: '500' }}>
+              Batas penggunaan API harian (Daily Quota) Anda telah habis. Silakan kembali besok atau gunakan API Key berbayar.
+            </div>
+          )}
+
+          {!isQuotaExceeded && rateLimitTimer > 0 && (
             <div style={{ padding: '10px 16px', background: 'var(--error-bg)', border: '1px solid var(--error-border)', color: 'var(--error)', borderRadius: '12px', marginBottom: '12px', fontSize: '13px', textAlign: 'center', fontWeight: '500' }}>
               Batas pesan gratis Anda terlalu cepat. Silakan tunggu <b>{rateLimitTimer} detik</b> lagi...
             </div>
@@ -428,18 +444,18 @@ export default function Home() {
                 ref={textareaRef}
                 className="chat-textarea"
                 rows={1}
-                placeholder={rateLimitTimer > 0 ? 'Menunggu waktu cooldown...' : 'Ceritakan perasaanmu...'}
+                placeholder={isQuotaExceeded ? 'Batas Harian (Daily Quota) Habis.' : rateLimitTimer > 0 ? 'Menunggu waktu cooldown...' : 'Ceritakan perasaanmu...'}
                 value={input}
                 onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
-                disabled={isLoading || rateLimitTimer > 0}
+                disabled={isLoading || rateLimitTimer > 0 || isQuotaExceeded}
                 style={{ padding: '12px' }}
               />
               <button
                 type="button"
-                className={`send-btn ${input.trim() && !isLoading && rateLimitTimer === 0 ? 'active' : 'inactive'}`}
+                className={`send-btn ${input.trim() && !isLoading && rateLimitTimer === 0 && !isQuotaExceeded ? 'active' : 'inactive'}`}
                 onClick={() => handleSend()}
-                disabled={isLoading || !input.trim() || rateLimitTimer > 0}
+                disabled={isLoading || !input.trim() || rateLimitTimer > 0 || isQuotaExceeded}
                 style={{ margin: '8px' }}
               >
                 ↑
