@@ -45,7 +45,7 @@ export default function Home() {
     // Fetch history
     // Jika user sedang login, biarkan backend memprioritaskan userId daripada sessionId (meski dikirim)
     // Tapi karena kita mengambil data, kita kirim saja yang ada. Backend akan handle jika ada auth session.
-    fetch(`/api/chat?sessionId=${storedId}`)
+    fetch(`/api/chat?sessionId=${storedId}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         if (data.history && data.history.length > 0) {
