@@ -86,8 +86,17 @@ export async function POST(request) {
   } catch (error) {
     console.error('Error di /api/chat:', error);
 
+    const isRateLimit = error.status === 429 || error.message?.includes('429');
+
+    if (isRateLimit) {
+      return NextResponse.json(
+        { code: 'RATE_LIMIT', error: 'Batas penggunaan fitur tercapai. Silakan tunggu.' },
+        { status: 429 }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'Terjadi kesalahan pada server. Silakan coba lagi.' },
+      { code: 'SERVER_ERROR', error: 'Terjadi kesalahan pada server. Silakan coba lagi.' },
       { status: 500 }
     );
   }

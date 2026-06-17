@@ -25,6 +25,7 @@ export default function Home() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
+  const [rateLimitTimer, setRateLimitTimer] = useState(0);
 
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
@@ -32,7 +33,15 @@ export default function Home() {
   // Auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, rateLimitTimer]);
+
+  // Rate Limit Countdown
+  useEffect(() => {
+    if (rateLimitTimer > 0) {
+      const timer = setTimeout(() => setRateLimitTimer(prev => prev - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [rateLimitTimer]);
 
   // Load sessions list
   const fetchSessionsList = async () => {
@@ -174,7 +183,7 @@ export default function Home() {
 
   async function handleSend(overrideMessage) {
     const userMessage = (overrideMessage ?? input).trim();
-    if (!userMessage || isLoading || !activeSessionId) return;
+    if (!userMessage || isLoading || !activeSessionId || rateLimitTimer > 0) return;
 
     setInput('');
     if (textareaRef.current) {
@@ -194,7 +203,12 @@ export default function Home() {
 
       const data = await response.json();
 
-      if (!response.ok) throw new Error(data.error || 'Gagal mendapat respons');
+      if (!response.ok) {
+        if (response.status === 429 || data.code === 'RATE_LIMIT') {
+          throw new Error('RATE_LIMIT');
+        }
+        throw new Error(data.error || 'Gagal mendapat respons');
+      }
 
       setMessages((prev) => [...prev, { role: 'model', text: data.reply }]);
 
@@ -205,10 +219,18 @@ export default function Home() {
 
     } catch (error) {
       console.error(error);
-      setMessages((prev) => [
-        ...prev,
-        { role: 'error', text: 'Koneksiku terputus sebentar. Boleh dicoba lagi ya? 🥺' },
-      ]);
+      if (error.message === 'RATE_LIMIT') {
+        setRateLimitTimer(20);
+        // Hapus pesan user yang barusan optimis ditambahkan
+        setMessages((prev) => prev.slice(0, -1));
+        // Kembalikan input user
+        if (!overrideMessage) setInput(userMessage);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'error', text: 'Koneksiku terputus sebentar. Boleh dicoba lagi ya? 🥺' },
+        ]);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -393,24 +415,31 @@ export default function Home() {
 
         {/* Input Area */}
         <div className="input-area" style={{ margin: '0 auto', width: '100%', maxWidth: '48rem', borderTop: 'none', background: 'transparent', paddingBottom: '24px' }}>
+          
+          {rateLimitTimer > 0 && (
+            <div style={{ padding: '10px 16px', background: 'var(--error-bg)', border: '1px solid var(--error-border)', color: 'var(--error)', borderRadius: '12px', marginBottom: '12px', fontSize: '13px', textAlign: 'center', fontWeight: '500' }}>
+              Batas pesan gratis Anda terlalu cepat. Silakan tunggu <b>{rateLimitTimer} detik</b> lagi...
+            </div>
+          )}
+
           <div className="input-inner" style={{ background: 'white', borderRadius: '16px', boxShadow: 'var(--shadow-md)', border: '1px solid var(--purple-border)', padding: '4px' }}>
             <div className="input-box" style={{ background: 'transparent' }}>
               <textarea
                 ref={textareaRef}
                 className="chat-textarea"
                 rows={1}
-                placeholder="Ceritakan perasaanmu..."
+                placeholder={rateLimitTimer > 0 ? 'Menunggu waktu cooldown...' : 'Ceritakan perasaanmu...'}
                 value={input}
                 onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
-                disabled={isLoading}
+                disabled={isLoading || rateLimitTimer > 0}
                 style={{ padding: '12px' }}
               />
               <button
                 type="button"
-                className={`send-btn ${input.trim() && !isLoading ? 'active' : 'inactive'}`}
+                className={`send-btn ${input.trim() && !isLoading && rateLimitTimer === 0 ? 'active' : 'inactive'}`}
                 onClick={() => handleSend()}
-                disabled={isLoading || !input.trim()}
+                disabled={isLoading || !input.trim() || rateLimitTimer > 0}
                 style={{ margin: '8px' }}
               >
                 ↑
