@@ -1,65 +1,189 @@
-import Image from "next/image";
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+
+const SUGGESTIONS = [
+  'Aku merasa cemas hari ini 😔',
+  'Lagi overwhelmed dengan banyak hal',
+  'Aku butuh seseorang untuk diajak bicara',
+  'Aku merasa tidak baik-baik saja',
+];
 
 export default function Home() {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const sessionIdRef = useRef(uuidv4());
+  const bottomRef = useRef(null);
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
+
+  async function handleSend(overrideMessage) {
+    const userMessage = (overrideMessage ?? input).trim();
+    const sessionId = sessionIdRef.current;
+
+    if (!userMessage || isLoading || !sessionId) return;
+
+    setInput('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+    setIsLoading(true);
+    setMessages((prev) => [...prev, { role: 'user', text: userMessage }]);
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMessage, sessionId }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.error || 'Gagal mendapat respons');
+
+      setMessages((prev) => [...prev, { role: 'model', text: data.reply }]);
+    } catch (error) {
+      console.error(error);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'error', text: 'Koneksiku terputus sebentar. Boleh dicoba lagi ya? 🥺' },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }
+
+  function handleTextareaChange(e) {
+    setInput(e.target.value);
+    e.target.style.height = 'auto';
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 150)}px`;
+  }
+
+  const isEmpty = messages.length === 0;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.js file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <main style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#FAFAF9' }}>
+
+      {/* ── Header ──────────────────────────────────────── */}
+      <header className="chat-header">
+        <div className="header-brand">
+          <div className="header-avatar">🌸</div>
+          <div className="header-info">
+            <h1>Teman Dengar</h1>
+            <p>Siap mendengarkanmu dengan hangat</p>
+          </div>
+        </div>
+        <div className="header-status">
+          <div className="status-dot"></div>
+          <span>Online</span>
+        </div>
+      </header>
+
+      {/* ── Chat Body ────────────────────────────────────── */}
+      <div className="chat-body">
+        <div className="chat-inner">
+
+          {/* Empty State */}
+          {isEmpty && (
+            <div className="empty-state">
+              <div className="empty-icon">✨</div>
+              <h2>Hei, apa yang kamu rasakan?</h2>
+              <p>Aku di sini untuk mendengarkan tanpa menghakimi. Ceritakan apapun yang ada di pikiranmu.</p>
+              <div className="suggestions">
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    className="suggestion-btn"
+                    onClick={() => handleSend(s)}
+                    disabled={isLoading}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Messages */}
+          {messages.map((msg, i) => (
+            <div
+              key={i}
+              className={`message-row ${msg.role === 'user' ? 'user-row' : ''}`}
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              {msg.role !== 'user' && (
+                <div className="msg-avatar">🌸</div>
+              )}
+              <div
+                className={`msg-bubble ${
+                  msg.role === 'user'
+                    ? 'bubble-user'
+                    : msg.role === 'error'
+                      ? 'bubble-error'
+                      : 'bubble-model'
+                }`}
+              >
+                {msg.text}
+              </div>
+            </div>
+          ))}
+
+          {/* Typing Indicator */}
+          {isLoading && (
+            <div className="message-row">
+              <div className="msg-avatar">🌸</div>
+              <div className="typing-bubble">
+                <div className="typing-dot"></div>
+                <div className="typing-dot"></div>
+                <div className="typing-dot"></div>
+              </div>
+            </div>
+          )}
+
+          <div ref={bottomRef} style={{ height: '8px' }} />
+        </div>
+      </div>
+
+      {/* ── Input Area ───────────────────────────────────── */}
+      <div className="input-area">
+        <div className="input-inner">
+          <div className="input-box">
+            <textarea
+              ref={textareaRef}
+              className="chat-textarea"
+              rows={1}
+              placeholder="Ceritakan perasaanmu..."
+              value={input}
+              onChange={handleTextareaChange}
+              onKeyDown={handleKeyDown}
+              disabled={isLoading}
+            />
+            <button
+              type="button"
+              className={`send-btn ${input.trim() && !isLoading ? 'active' : 'inactive'}`}
+              onClick={() => handleSend()}
+              disabled={isLoading || !input.trim()}
             >
-              Learning
-            </a>{" "}
-            center.
+              ↑
+            </button>
+          </div>
+          <p className="input-footer">
+            Teman Dengar bukan pengganti psikolog profesional. Jika darurat, hubungi{' '}
+            <span>119 ext 8</span>.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
