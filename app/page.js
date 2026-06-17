@@ -14,13 +14,46 @@ export default function Home() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const sessionIdRef = useRef(uuidv4());
+  const [isInitializing, setIsInitializing] = useState(true);
+  const sessionIdRef = useRef('');
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
 
+  // Auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  // Load history from MongoDB via localStorage sessionId
+  useEffect(() => {
+    const LOCAL_KEY = 'teman_dengar_session';
+    let storedId = localStorage.getItem(LOCAL_KEY);
+    
+    if (!storedId) {
+      storedId = uuidv4();
+      localStorage.setItem(LOCAL_KEY, storedId);
+      sessionIdRef.current = storedId;
+      setIsInitializing(false);
+      return;
+    }
+
+    sessionIdRef.current = storedId;
+    
+    // Fetch history
+    fetch(`/api/chat?sessionId=${storedId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.history && data.history.length > 0) {
+          const formattedHistory = data.history.map((msg) => ({
+            role: msg.role,
+            text: msg.parts.map((p) => p.text).join('\n'),
+          }));
+          setMessages(formattedHistory);
+        }
+      })
+      .catch((err) => console.error('Gagal memuat history:', err))
+      .finally(() => setIsInitializing(false));
+  }, []);
 
   async function handleSend(overrideMessage) {
     const userMessage = (overrideMessage ?? input).trim();
@@ -71,7 +104,7 @@ export default function Home() {
     e.target.style.height = `${Math.min(e.target.scrollHeight, 150)}px`;
   }
 
-  const isEmpty = messages.length === 0;
+  const isEmpty = messages.length === 0 && !isInitializing;
 
   return (
     <main style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#FAFAF9' }}>

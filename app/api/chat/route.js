@@ -77,3 +77,26 @@ export async function POST(request) {
     );
   }
 }
+
+export async function GET(request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const sessionId = searchParams.get('sessionId');
+
+    if (!sessionId) {
+      return NextResponse.json({ error: 'sessionId required' }, { status: 400 });
+    }
+
+    await connectDB();
+    const session = await ChatSession.findOne({ sessionId });
+
+    if (!session) {
+      return NextResponse.json({ history: [] });
+    }
+
+    return NextResponse.json({ history: session.history });
+  } catch (error) {
+    console.error('Error fetching history:', error);
+    return NextResponse.json({ error: 'Gagal memuat history' }, { status: 500 });
+  }
+}
