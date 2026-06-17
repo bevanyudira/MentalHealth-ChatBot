@@ -27,6 +27,7 @@ export default function Home() {
   const [editTitle, setEditTitle] = useState('');
   const [rateLimitTimer, setRateLimitTimer] = useState(0);
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
+  const [rateLimitMessage, setRateLimitMessage] = useState('');
 
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
@@ -207,9 +208,9 @@ export default function Home() {
       if (!response.ok) {
         if (response.status === 429) {
           if (data.code === 'QUOTA_EXCEEDED') {
-            throw new Error('QUOTA_EXCEEDED');
+            throw new Error(`QUOTA_EXCEEDED|${data.error || ''}`);
           } else if (data.code === 'RATE_LIMIT') {
-            throw new Error(`RATE_LIMIT:${data.retryDelay || 20}`);
+            throw new Error(`RATE_LIMIT|${data.retryDelay || 20}|${data.error || ''}`);
           }
         }
         throw new Error(data.error || 'Gagal mendapat respons');
@@ -226,13 +227,18 @@ export default function Home() {
       console.error(error);
       const errMsg = error.message || '';
       
-      if (errMsg === 'QUOTA_EXCEEDED') {
+      if (errMsg.startsWith('QUOTA_EXCEEDED')) {
+        const exactError = errMsg.split('|')[1] || '';
         setIsQuotaExceeded(true);
+        setRateLimitMessage(exactError);
         setMessages((prev) => prev.slice(0, -1));
         if (!overrideMessage) setInput(userMessage);
       } else if (errMsg.startsWith('RATE_LIMIT')) {
-        const delay = parseInt(errMsg.split(':')[1], 10) || 20;
+        const parts = errMsg.split('|');
+        const delay = parseInt(parts[1], 10) || 20;
+        const exactError = parts[2] || '';
         setRateLimitTimer(delay);
+        setRateLimitMessage(exactError);
         setMessages((prev) => prev.slice(0, -1));
         if (!overrideMessage) setInput(userMessage);
       } else {
@@ -428,13 +434,15 @@ export default function Home() {
           
           {isQuotaExceeded && (
             <div style={{ padding: '10px 16px', background: 'var(--error-bg)', border: '1px solid var(--error-border)', color: 'var(--error)', borderRadius: '12px', marginBottom: '12px', fontSize: '13px', textAlign: 'center', fontWeight: '500' }}>
-              Batas penggunaan API harian (Daily Quota) Anda telah habis. Silakan kembali besok atau gunakan API Key berbayar.
+              <p>Batas penggunaan API harian (Daily Quota) Anda telah habis. Silakan kembali besok atau gunakan API Key berbayar.</p>
+              {rateLimitMessage && <p style={{ fontSize: '11px', marginTop: '6px', opacity: 0.8 }}>Log Gemini: {rateLimitMessage}</p>}
             </div>
           )}
 
           {!isQuotaExceeded && rateLimitTimer > 0 && (
             <div style={{ padding: '10px 16px', background: 'var(--error-bg)', border: '1px solid var(--error-border)', color: 'var(--error)', borderRadius: '12px', marginBottom: '12px', fontSize: '13px', textAlign: 'center', fontWeight: '500' }}>
-              Batas pesan gratis Anda terlalu cepat. Silakan tunggu <b>{rateLimitTimer} detik</b> lagi...
+              <p>Batas pesan gratis Anda terlalu cepat. Silakan tunggu <b>{rateLimitTimer} detik</b> lagi...</p>
+              {rateLimitMessage && <p style={{ fontSize: '11px', marginTop: '6px', opacity: 0.8 }}>Log Gemini: {rateLimitMessage}</p>}
             </div>
           )}
 

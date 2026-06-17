@@ -89,42 +89,40 @@ export async function POST(request) {
     let isRateLimit = false;
     let retryDelaySeconds = 20;
     let isDailyQuota = false;
+    let rawGeminiMessage = '';
 
     if (error.status === 429 || error.message?.includes('429')) {
       isRateLimit = true;
+      rawGeminiMessage = error.message || 'Rate limit exceeded';
       
-      // Coba parse errorDetails dari respons Google Generative AI
-      if (error.errorDetails && Array.isArray(error.errorDetails)) {
-        for (const detail of error.errorDetails) {
-          if (detail['@type'] === 'type.googleapis.com/google.rpc.RetryInfo' && detail.retryDelay) {
-            const delay = parseInt(detail.retryDelay.replace('s', ''), 10);
-            if (!isNaN(delay)) retryDelaySeconds = delay;
-          }
-          if (detail['@type'] === 'type.googleapis.com/google.rpc.QuotaFailure' && Array.isArray(detail.violations)) {
-            for (const v of detail.violations) {
-              // Deteksi jika limit yang dicapai adalah per hari (PerDay)
-              if (v.quotaId && v.quotaId.toLowerCase().includes('perday')) {
-                isDailyQuota = true;
-              }
-            }
-          }
+      try {
+        const strError = JSON.stringify(error, Object.getOwnPropertyNames(error));
+        
+        // Regex untuk mencari retryDelay, misal: "retryDelay": "17s"
+        const retryMatch = strError.match(/retryDelay["\s]*:[\s]*["']?(\d+)s/i);
+        if (retryMatch && retryMatch[1]) {
+          const delay = parseInt(retryMatch[1], 10);
+          if (!isNaN(delay)) retryDelaySeconds = delay;
         }
-      }
-      // Jika error message string dari Mongoose/Google berisi tulisan PerDay
-      if (error.message?.toLowerCase().includes('perday')) {
-        isDailyQuota = true;
+
+        // Cari tulisan PerDay
+        if (strError.toLowerCase().includes('perday')) {
+          isDailyQuota = true;
+        }
+      } catch (e) {
+        console.error('Gagal mem-parse error Gemini:', e);
       }
     }
 
     if (isRateLimit) {
       if (isDailyQuota) {
         return NextResponse.json(
-          { code: 'QUOTA_EXCEEDED', error: 'Batas penggunaan harian Gemini API Anda telah habis. Silakan coba lagi besok.' },
+          { code: 'QUOTA_EXCEEDED', error: rawGeminiMessage },
           { status: 429 }
         );
       }
       return NextResponse.json(
-        { code: 'RATE_LIMIT', retryDelay: retryDelaySeconds, error: 'Batas pesan terlalu cepat. Silakan tunggu.' },
+        { code: 'RATE_LIMIT', retryDelay: retryDelaySeconds, error: rawGeminiMessage },
         { status: 429 }
       );
     }
