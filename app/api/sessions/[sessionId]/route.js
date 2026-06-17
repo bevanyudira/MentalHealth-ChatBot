@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 export async function PATCH(request, { params }) {
   try {
-    const { sessionId } = params;
+    const { sessionId } = await params;
     const body = await request.json();
     const { title } = body;
 
@@ -43,7 +43,7 @@ export async function PATCH(request, { params }) {
 
 export async function DELETE(request, { params }) {
   try {
-    const { sessionId } = params;
+    const { sessionId } = await params;
 
     if (!sessionId) {
       return NextResponse.json({ error: 'sessionId wajib diisi' }, { status: 400 });
