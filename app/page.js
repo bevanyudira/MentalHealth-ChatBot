@@ -23,6 +23,8 @@ export default function Home() {
   const [sessionsList, setSessionsList] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
 
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
@@ -122,6 +124,54 @@ export default function Home() {
     setIsSidebarOpen(false);
   };
 
+  const handleDeleteSession = async (sessionId, e) => {
+    e.stopPropagation();
+    if (!confirm('Apakah Anda yakin ingin menghapus obrolan ini?')) return;
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setSessionsList((prev) => prev.filter((s) => s.sessionId !== sessionId));
+        if (activeSessionId === sessionId) {
+          handleNewChat();
+        }
+      }
+    } catch (err) {
+      console.error('Gagal menghapus sesi:', err);
+    }
+  };
+
+  const handleStartRename = (sessionObj, e) => {
+    e.stopPropagation();
+    setEditingSessionId(sessionObj.sessionId);
+    setEditTitle(sessionObj.title || 'Obrolan Baru');
+  };
+
+  const handleSaveRename = async (sessionId) => {
+    if (!editTitle.trim()) {
+      setEditingSessionId(null);
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: editTitle.trim() }),
+      });
+
+      if (res.ok) {
+        setSessionsList((prev) =>
+          prev.map((s) => (s.sessionId === sessionId ? { ...s, title: editTitle.trim() } : s))
+        );
+      }
+    } catch (err) {
+      console.error('Gagal mengganti nama:', err);
+    } finally {
+      setEditingSessionId(null);
+    }
+  };
+
   async function handleSend(overrideMessage) {
     const userMessage = (overrideMessage ?? input).trim();
     if (!userMessage || isLoading || !activeSessionId) return;
@@ -202,13 +252,39 @@ export default function Home() {
             </div>
           )}
           {session && sessionsList.map((s) => (
-            <button
+            <div
               key={s.sessionId}
               className={`session-item ${activeSessionId === s.sessionId ? 'active' : ''}`}
               onClick={() => handleSelectSession(s.sessionId)}
             >
-              {s.title || 'Obrolan Baru'}
-            </button>
+              {editingSessionId === s.sessionId ? (
+                <input
+                  type="text"
+                  className="rename-input"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  onBlur={() => handleSaveRename(s.sessionId)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveRename(s.sessionId);
+                    if (e.key === 'Escape') setEditingSessionId(null);
+                  }}
+                  autoFocus
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <>
+                  <span className="session-title">{s.title || 'Obrolan Baru'}</span>
+                  <div className="session-actions">
+                    <button className="action-btn" onClick={(e) => handleStartRename(s, e)} title="Ganti Nama">
+                      ✏️
+                    </button>
+                    <button className="action-btn delete" onClick={(e) => handleDeleteSession(s.sessionId, e)} title="Hapus">
+                      🗑️
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           ))}
         </div>
 
