@@ -40,8 +40,15 @@ export async function POST(request) {
       systemInstruction: SYSTEM_PROMPT,
     });
 
+    // Bersihkan history dari field _id bawaan Mongoose
+    // karena Gemini API akan me-reject payload jika ada field tidak dikenal
+    const cleanHistory = session.history.map((msg) => ({
+      role: msg.role,
+      parts: msg.parts.map((p) => ({ text: p.text })),
+    }));
+
     const chat = model.startChat({
-      history: session.history,
+      history: cleanHistory,
     });
 
     const result = await chat.sendMessage(message);
