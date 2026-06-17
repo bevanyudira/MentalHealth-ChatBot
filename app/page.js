@@ -18,7 +18,12 @@ export default function Home() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
-  const sessionIdRef = useRef('');
+  
+  // Sidebar states
+  const [sessionsList, setSessionsList] = useState([]);
+  const [activeSessionId, setActiveSessionId] = useState('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -27,57 +32,114 @@ export default function Home() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
-  // Load history from MongoDB via localStorage sessionId
-  useEffect(() => {
-    const LOCAL_KEY = 'teman_dengar_session';
-    let storedId = localStorage.getItem(LOCAL_KEY);
-    
-    if (!storedId) {
-      storedId = uuidv4();
-      localStorage.setItem(LOCAL_KEY, storedId);
-      sessionIdRef.current = storedId;
-      setIsInitializing(false);
-      return;
+  // Load sessions list
+  const fetchSessionsList = async () => {
+    if (!session) return;
+    try {
+      const res = await fetch('/api/sessions', { cache: 'no-store' });
+      const data = await res.json();
+      if (data.sessions) {
+        setSessionsList(data.sessions);
+      }
+    } catch (err) {
+      console.error('Gagal memuat daftar sesi:', err);
     }
+  };
 
-    sessionIdRef.current = storedId;
-    
-    // Fetch history
-    // Jika user sedang login, biarkan backend memprioritaskan userId daripada sessionId (meski dikirim)
-    // Tapi karena kita mengambil data, kita kirim saja yang ada. Backend akan handle jika ada auth session.
-    fetch(`/api/chat?sessionId=${storedId}`, { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.history && data.history.length > 0) {
-          const formattedHistory = data.history.map((msg) => ({
-            role: msg.role,
-            text: msg.parts.map((p) => p.text).join('\n'),
-          }));
-          setMessages(formattedHistory);
+  // Initial load
+  useEffect(() => {
+    const init = async () => {
+      let currentSessionId = '';
+      
+      if (session) {
+        await fetchSessionsList();
+      }
+
+      // Read from URL if present
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlSessionId = urlParams.get('chat');
+      
+      if (urlSessionId) {
+        currentSessionId = urlSessionId;
+      } else {
+        const LOCAL_KEY = 'teman_dengar_session';
+        let storedId = localStorage.getItem(LOCAL_KEY);
+        if (!storedId) {
+          storedId = uuidv4();
+          localStorage.setItem(LOCAL_KEY, storedId);
         }
-      })
-      .catch((err) => console.error('Gagal memuat history:', err))
-      .finally(() => setIsInitializing(false));
-  }, []);
+        currentSessionId = storedId;
+      }
+
+      setActiveSessionId(currentSessionId);
+      await loadChatHistory(currentSessionId);
+      setIsInitializing(false);
+    };
+
+    init();
+  }, [session]);
+
+  const loadChatHistory = async (sessionId) => {
+    try {
+      const res = await fetch(`/api/chat?sessionId=${sessionId}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (data.history && data.history.length > 0) {
+        const formattedHistory = data.history.map((msg) => ({
+          role: msg.role,
+          text: msg.parts.map((p) => p.text).join('\n'),
+        }));
+        setMessages(formattedHistory);
+      } else {
+        setMessages([]);
+      }
+    } catch (err) {
+      console.error('Gagal memuat history:', err);
+      setMessages([]);
+    }
+  };
+
+  const handleNewChat = () => {
+    const newId = uuidv4();
+    setActiveSessionId(newId);
+    setMessages([]);
+    if (!session) {
+      localStorage.setItem('teman_dengar_session', newId);
+    }
+    // Update URL without reload
+    window.history.pushState({}, '', `/?chat=${newId}`);
+    setIsSidebarOpen(false); // Close mobile sidebar
+  };
+
+  const handleSelectSession = (sessionId) => {
+    setActiveSessionId(sessionId);
+    setMessages([]);
+    setIsInitializing(true);
+    if (!session) {
+      localStorage.setItem('teman_dengar_session', sessionId);
+    }
+    window.history.pushState({}, '', `/?chat=${sessionId}`);
+    loadChatHistory(sessionId).finally(() => setIsInitializing(false));
+    setIsSidebarOpen(false);
+  };
 
   async function handleSend(overrideMessage) {
     const userMessage = (overrideMessage ?? input).trim();
-    const sessionId = sessionIdRef.current;
-
-    if (!userMessage || isLoading || !sessionId) return;
+    if (!userMessage || isLoading || !activeSessionId) return;
 
     setInput('');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
     setIsLoading(true);
+    
+    const isFirstMessage = messages.length === 0;
     setMessages((prev) => [...prev, { role: 'user', text: userMessage }]);
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage, sessionId }),
+        body: JSON.stringify({ message: userMessage, sessionId: activeSessionId }),
       });
 
       const data = await response.json();
@@ -85,6 +147,12 @@ export default function Home() {
       if (!response.ok) throw new Error(data.error || 'Gagal mendapat respons');
 
       setMessages((prev) => [...prev, { role: 'model', text: data.reply }]);
+
+      // Refresh session list if it was the first message
+      if (isFirstMessage && session) {
+        fetchSessionsList();
+      }
+
     } catch (error) {
       console.error(error);
       setMessages((prev) => [
@@ -112,133 +180,173 @@ export default function Home() {
   const isEmpty = messages.length === 0 && !isInitializing;
 
   return (
-    <main style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#FAFAF9' }}>
+    <div className="app-layout">
+      {/* ── Sidebar Overlay (Mobile) ────────────────────────── */}
+      <div 
+        className={`sidebar-overlay ${isSidebarOpen ? 'open' : ''}`}
+        onClick={() => setIsSidebarOpen(false)}
+      ></div>
 
-      {/* ── Header ──────────────────────────────────────── */}
-      <header className="chat-header">
-        <div className="header-brand">
-          <div className="header-avatar">🌸</div>
-          <div className="header-info">
-            <h1>Teman Dengar</h1>
-            <p>Siap mendengarkanmu dengan hangat</p>
-          </div>
+      {/* ── Sidebar ────────────────────────────────────────── */}
+      <aside className={`sidebar ${isSidebarOpen ? 'open' : ''}`}>
+        <div className="sidebar-header">
+          <button className="new-chat-btn" onClick={handleNewChat}>
+            <span>+</span> Obrolan Baru
+          </button>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+
+        <div className="session-list">
+          {!session && (
+            <div style={{ padding: '20px 12px', textAlign: 'center', color: 'var(--gray-500)', fontSize: '13px' }}>
+              Masuk untuk menyimpan banyak obrolan.
+            </div>
+          )}
+          {session && sessionsList.map((s) => (
+            <button
+              key={s.sessionId}
+              className={`session-item ${activeSessionId === s.sessionId ? 'active' : ''}`}
+              onClick={() => handleSelectSession(s.sessionId)}
+            >
+              {s.title || 'Obrolan Baru'}
+            </button>
+          ))}
+        </div>
+
+        <div className="sidebar-footer">
           {session ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span style={{ fontSize: '13px', fontWeight: '500', color: 'var(--gray-600)' }}>
-                {session.user.name}
-              </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--gray-800)', padding: '0 4px' }}>
+                👤 {session.user.name}
+              </div>
               <button 
                 onClick={() => signOut()}
-                style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '6px', background: 'var(--gray-100)', color: 'var(--gray-600)', border: 'none', cursor: 'pointer' }}
+                style={{ width: '100%', fontSize: '13px', padding: '8px', borderRadius: '8px', background: 'var(--gray-200)', color: 'var(--gray-700)', border: 'none', cursor: 'pointer', fontWeight: '500' }}
               >
-                Logout
+                Keluar
               </button>
             </div>
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <Link href="/login" style={{ fontSize: '13px', color: 'var(--purple)', textDecoration: 'none', fontWeight: '500' }}>
-                Masuk
-              </Link>
-            </div>
+            <Link 
+              href="/login" 
+              style={{ display: 'block', textAlign: 'center', width: '100%', fontSize: '13px', padding: '10px', borderRadius: '8px', background: 'var(--purple)', color: 'white', textDecoration: 'none', fontWeight: '600' }}
+            >
+              Masuk / Daftar
+            </Link>
           )}
         </div>
-      </header>
+      </aside>
 
-      {/* ── Chat Body ────────────────────────────────────── */}
-      <div className="chat-body">
-        <div className="chat-inner">
-
-          {/* Empty State */}
-          {isEmpty && (
-            <div className="empty-state">
-              <div className="empty-icon">✨</div>
-              <h2>Hei, apa yang kamu rasakan?</h2>
-              <p>Aku di sini untuk mendengarkan tanpa menghakimi. Ceritakan apapun yang ada di pikiranmu.</p>
-              <div className="suggestions">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    className="suggestion-btn"
-                    onClick={() => handleSend(s)}
-                    disabled={isLoading}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Messages */}
-          {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`message-row ${msg.role === 'user' ? 'user-row' : ''}`}
-            >
-              {msg.role !== 'user' && (
-                <div className="msg-avatar">🌸</div>
-              )}
-              <div
-                className={`msg-bubble ${
-                  msg.role === 'user'
-                    ? 'bubble-user'
-                    : msg.role === 'error'
-                      ? 'bubble-error'
-                      : 'bubble-model'
-                }`}
-              >
-                {msg.text}
-              </div>
-            </div>
-          ))}
-
-          {/* Typing Indicator */}
-          {isLoading && (
-            <div className="message-row">
-              <div className="msg-avatar">🌸</div>
-              <div className="typing-bubble">
-                <div className="typing-dot"></div>
-                <div className="typing-dot"></div>
-                <div className="typing-dot"></div>
-              </div>
-            </div>
-          )}
-
-          <div ref={bottomRef} style={{ height: '8px' }} />
-        </div>
-      </div>
-
-      {/* ── Input Area ───────────────────────────────────── */}
-      <div className="input-area">
-        <div className="input-inner">
-          <div className="input-box">
-            <textarea
-              ref={textareaRef}
-              className="chat-textarea"
-              rows={1}
-              placeholder="Ceritakan perasaanmu..."
-              value={input}
-              onChange={handleTextareaChange}
-              onKeyDown={handleKeyDown}
-              disabled={isLoading}
-            />
-            <button
-              type="button"
-              className={`send-btn ${input.trim() && !isLoading ? 'active' : 'inactive'}`}
-              onClick={() => handleSend()}
-              disabled={isLoading || !input.trim()}
-            >
-              ↑
+      {/* ── Main Chat Area ─────────────────────────────────── */}
+      <main className="main-chat-area">
+        {/* Header */}
+        <header className="chat-header" style={{ justifyContent: 'space-between' }}>
+          <div className="header-brand">
+            <button className="mobile-menu-btn" onClick={() => setIsSidebarOpen(true)}>
+              ☰
             </button>
+            <div className="header-avatar" style={{ display: 'none' }}>🌸</div>
+            <div className="header-info">
+              <h1>Teman Dengar</h1>
+            </div>
           </div>
-          <p className="input-footer">
-            Teman Dengar bukan pengganti psikolog profesional. Jika darurat, hubungi{' '}
+          <div className="header-status" style={{ marginRight: '16px' }}>
+            <div className="status-dot"></div>
+            <span style={{ fontSize: '13px', color: 'var(--gray-500)' }}>Online</span>
+          </div>
+        </header>
+
+        {/* Chat Body */}
+        <div className="chat-body" style={{ margin: '0 auto', width: '100%', maxWidth: '48rem' }}>
+          <div className="chat-inner">
+            {isEmpty && (
+              <div className="empty-state">
+                <div className="empty-icon">✨</div>
+                <h2>Hei, apa yang kamu rasakan?</h2>
+                <p>Aku di sini untuk mendengarkan tanpa menghakimi. Ceritakan apapun yang ada di pikiranmu.</p>
+                <div className="suggestions">
+                  {SUGGESTIONS.map((s) => (
+                    <button
+                      key={s}
+                      className="suggestion-btn"
+                      onClick={() => handleSend(s)}
+                      disabled={isLoading}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {messages.map((msg, i) => (
+              <div
+                key={i}
+                className={`message-row ${msg.role === 'user' ? 'user-row' : ''}`}
+              >
+                {msg.role !== 'user' && (
+                  <div className="msg-avatar">🌸</div>
+                )}
+                <div
+                  className={`msg-bubble ${
+                    msg.role === 'user'
+                      ? 'bubble-user'
+                      : msg.role === 'error'
+                        ? 'bubble-error'
+                        : 'bubble-model'
+                  }`}
+                >
+                  {msg.text}
+                </div>
+              </div>
+            ))}
+
+            {isLoading && (
+              <div className="message-row">
+                <div className="msg-avatar">🌸</div>
+                <div className="typing-bubble">
+                  <div className="typing-dot"></div>
+                  <div className="typing-dot"></div>
+                  <div className="typing-dot"></div>
+                </div>
+              </div>
+            )}
+
+            <div ref={bottomRef} style={{ height: '8px' }} />
+          </div>
+        </div>
+
+        {/* Input Area */}
+        <div className="input-area" style={{ margin: '0 auto', width: '100%', maxWidth: '48rem', borderTop: 'none', background: 'transparent', paddingBottom: '24px' }}>
+          <div className="input-inner" style={{ background: 'white', borderRadius: '16px', boxShadow: 'var(--shadow-md)', border: '1px solid var(--purple-border)', padding: '4px' }}>
+            <div className="input-box" style={{ background: 'transparent' }}>
+              <textarea
+                ref={textareaRef}
+                className="chat-textarea"
+                rows={1}
+                placeholder="Ceritakan perasaanmu..."
+                value={input}
+                onChange={handleTextareaChange}
+                onKeyDown={handleKeyDown}
+                disabled={isLoading}
+                style={{ padding: '12px' }}
+              />
+              <button
+                type="button"
+                className={`send-btn ${input.trim() && !isLoading ? 'active' : 'inactive'}`}
+                onClick={() => handleSend()}
+                disabled={isLoading || !input.trim()}
+                style={{ margin: '8px' }}
+              >
+                ↑
+              </button>
+            </div>
+          </div>
+          <p className="input-footer" style={{ textAlign: 'center', marginTop: '12px' }}>
+            Teman Dengar bukan pengganti psikolog. Jika darurat, hubungi{' '}
             <span>119 ext 8</span>.
           </p>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

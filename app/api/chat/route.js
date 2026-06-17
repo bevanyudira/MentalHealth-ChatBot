@@ -35,18 +35,18 @@ export async function POST(request) {
     const sessionAuth = await getServerSession(authOptions);
     const userId = sessionAuth?.user?.id;
 
-    let session;
-    if (userId) {
-      session = await ChatSession.findOne({ userId });
-    } else {
-      session = await ChatSession.findOne({ sessionId });
-    }
+    let session = await ChatSession.findOne({ sessionId });
 
-    if (!session) {
+    if (session) {
+      if (session.userId && session.userId.toString() !== userId) {
+        return NextResponse.json({ error: 'Tidak ada akses ke sesi ini' }, { status: 403 });
+      }
+    } else {
       session = new ChatSession({ 
-        sessionId: userId ? `user-${userId}` : sessionId, 
+        sessionId: sessionId, 
         userId: userId || null, 
-        history: [] 
+        history: [],
+        title: message.substring(0, 30) + (message.length > 30 ? '...' : '')
       });
     }
 
@@ -103,14 +103,14 @@ export async function GET(request) {
     const sessionAuth = await getServerSession(authOptions);
     const userId = sessionAuth?.user?.id;
 
-    let session;
-    if (userId) {
-      session = await ChatSession.findOne({ userId });
-    } else {
-      if (!sessionId) {
-        return NextResponse.json({ error: 'sessionId required' }, { status: 400 });
-      }
-      session = await ChatSession.findOne({ sessionId });
+    if (!sessionId) {
+      return NextResponse.json({ error: 'sessionId required' }, { status: 400 });
+    }
+
+    const session = await ChatSession.findOne({ sessionId });
+
+    if (session && session.userId && session.userId.toString() !== userId) {
+      return NextResponse.json({ error: 'Tidak ada akses ke sesi ini' }, { status: 403 });
     }
 
     if (!session) {
